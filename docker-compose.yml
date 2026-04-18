@@ -1,0 +1,31 @@
+services:
+  web:
+    build:
+      context: .
+      target: runtime
+    image: biosi-web:latest
+    container_name: biosi-web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Mount source code in dev only — override in docker-compose.override.yml
+    # volumes:
+    #   - .:/app:cached
+
+  # ── Local development overrides ──────────────────────────────────────────
+  # Create docker-compose.override.yml for hot-reload in dev:
+  #
+  #   services:
+  #     web:
+  #       command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+  #       volumes:
+  #         - .:/app:cached
