@@ -171,12 +171,20 @@ def _build_insight_fields(event: Event, competitor_name: str | None) -> dict:
 
     if competitor_name is not None:
         setattr(event, "_intelligence_competitor_name", competitor_name)
-    insight = build_event_insight(event)
+    try:
+        insight = build_event_insight(event)
+    except Exception:
+        insight = {
+            "summary": None,
+            "risk_reason": None,
+            "recommended_action": None,
+            "confidence_note": None,
+        }
     return {
-        "asset_code": _metadata_value(event, "asset_code"),
-        "development_stage": _metadata_value(event, "development_stage"),
-        "competitor_tier": _metadata_value(event, "competitor_tier"),
-        "estimated_launch_year": _metadata_value(event, "estimated_launch_year"),
+        "asset_code": (event.metadata_json or {}).get("asset_code"),
+        "development_stage": (event.metadata_json or {}).get("development_stage"),
+        "competitor_tier": (event.metadata_json or {}).get("competitor_tier"),
+        "estimated_launch_year": (event.metadata_json or {}).get("estimated_launch_year"),
         "summary": insight.get("summary"),
         "risk_reason": insight.get("risk_reason"),
         "recommended_action": insight.get("recommended_action"),

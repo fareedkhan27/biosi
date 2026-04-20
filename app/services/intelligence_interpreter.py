@@ -379,7 +379,15 @@ def build_competitor_summary(events: list[Event]) -> dict[str, Any]:
 
 
 def _serialize_event(event: Event) -> dict[str, Any]:
-    insight = build_event_insight(event)
+    try:
+        insight = build_event_insight(event)
+    except Exception:
+        insight = {
+            "summary": None,
+            "risk_reason": None,
+            "recommended_action": None,
+            "confidence_note": None,
+        }
     metadata = _event_metadata(event)
     return {
         "id": str(event.id),

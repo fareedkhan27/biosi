@@ -1,5 +1,5 @@
 # ── Stage 1: dependency builder ─────────────────────────────────────────────
-# cache-bust: 2026-04-21
+# cache-bust: 2026-04-21b
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
