@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,12 @@ class Event(Base):
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    indication: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    threat_score: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    traffic_light: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    review_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending", server_default=text("'pending'"), index=True
+    )
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

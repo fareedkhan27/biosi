@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import uvicorn
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -20,6 +22,24 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import configure_logging
 
 logger = logging.getLogger(__name__)
+
+OPENAPI_TAGS = [
+    {
+        "name": "Observability/Health",
+        "description": "Service liveness and observability endpoints.",
+    },
+    {"name": "Jobs", "description": "Data ingestion job endpoints."},
+    {"name": "Events", "description": "Event CRUD endpoints."},
+    {
+        "name": "Reviews",
+        "description": "Event approval/rejection and review workflow endpoints.",
+    },
+    {"name": "Dashboards", "description": "Dashboard summary and analytics endpoints."},
+    {
+        "name": "Intelligence",
+        "description": "Deterministic interpretation endpoints for decision-ready event insights.",
+    },
+]
 
 
 @asynccontextmanager
@@ -40,6 +60,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.service_version,
         description="Biosimilar Competitive Intelligence Platform API",
+        openapi_tags=OPENAPI_TAGS,
         docs_url="/docs" if settings.app_env != "production" else None,
         redoc_url="/redoc" if settings.app_env != "production" else None,
         lifespan=lifespan,
@@ -48,11 +69,26 @@ def create_app() -> FastAPI:
     # ── CORS ──────────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=["*"] if settings.cors_allow_all else settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def request_log_middleware(request: Request, call_next):
+        started = perf_counter()
+        response = await call_next(request)
+        duration_ms = round((perf_counter() - started) * 1000, 2)
+        logger.info(
+            "request method=%s path=%s status=%s duration_ms=%s ip=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+            request.client.host if request.client else "unknown",
+        )
+        return response
 
     # ── Routers ───────────────────────────────────────────────────────────────
     app.include_router(v1_router)
@@ -74,3 +110,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+if __name__ == "__main__":
+    uvicorn.run("app.main:app", host=settings.host, port=settings.port)

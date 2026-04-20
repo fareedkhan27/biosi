@@ -18,12 +18,15 @@
 4. [Database Migrations](#database-migrations)
 5. [Seed Reference Data](#seed-reference-data)
 6. [Running the API](#running-the-api)
-7. [Docker](#docker)
-8. [Testing](#testing)
-9. [Code Quality](#code-quality)
-10. [Environment Variables Reference](#environment-variables-reference)
-11. [Branching Strategy](#branching-strategy)
-12. [Contributing](#contributing)
+7. [Deployment on Railway](#deployment-on-railway)
+8. [Docker](#docker)
+9. [Testing](#testing)
+10. [Milestone 6 Demo Flow (<5 Minutes)](#milestone-6-demo-flow-5-minutes)
+11. [Workflow Automation](#workflow-automation)
+12. [Code Quality](#code-quality)
+13. [Environment Variables Reference](#environment-variables-reference)
+14. [Branching Strategy](#branching-strategy)
+15. [Contributing](#contributing)
 
 ---
 
@@ -112,6 +115,8 @@ Biosi/
 
 - Python 3.12+
 - Git
+- PostgreSQL database (local Postgres or Neon)
+- A configured `.env` with working `DATABASE_URL` and `DATABASE_URL_DIRECT`
 
 ### 1. Clone & enter the project
 
@@ -150,6 +155,8 @@ cp .env.example .env
 pre-commit install
 ```
 
+> Note: For n8n integration, use the Railway production API URL (`https://biosi-production.up.railway.app`) directly. No tunnel setup is required.
+
 ---
 
 ## Database Migrations
@@ -175,12 +182,23 @@ alembic downgrade -1
 ## Seed Reference Data
 
 ```bash
+# Seeds source metadata + scoring rules (idempotent)
 python -m app.db.seed
+
+# Seeds Milestone 6 demo competitors + events (idempotent)
+python -m scripts.seeddemodata
 ```
 
-Idempotent — safe to run multiple times. Seeds:
+Both commands are idempotent and safe to run multiple times.
+
+Reference seed includes:
 - **Sources**: ClinicalTrials.gov, EMA, FDA
 - **Scoring rules**: trial phase change, approval/rejection, label update
+
+Demo seed includes:
+- **Amgen / ABP 206** (clinical development, Phase 3, Amber-style)
+- **Henlius / HLX18** (regulatory IND-style, Amber-style)
+- **India launch-style narrative** (Zydus)
 
 ---
 
@@ -197,8 +215,77 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/health` | Liveness check |
+| `POST /api/v1/jobs/ingest/clinicaltrials` | Run ClinicalTrials.gov API v2 ingestion |
+| `POST /api/v1/jobs/ingest/press-release` | Extract and ingest a press-release event via OpenRouter |
+| `GET /api/v1/dashboards/summary` | Dashboard totals by review status + traffic light |
+| `GET /api/v1/dashboards/top-threats` | Highest-risk events first |
+| `GET /api/v1/dashboards/recent-events` | Most recent events first |
+| `GET /api/v1/dashboards/review-queue` | Pending analyst review queue |
 | `GET /docs` | Swagger UI (dev/staging only) |
 | `GET /redoc` | ReDoc (dev/staging only) |
+
+---
+
+## Deployment on Railway
+
+Biosi is deployed on Railway using **Railpack** (the default Railway builder).
+
+Production API URL: https://biosi-production.up.railway.app
+
+### Service root directory
+
+Railway can be configured in either of these ways:
+
+- Use the repository root as the service root. Railpack will detect the root-level `requirements.txt`, `start.sh`, and `railway.toml`.
+- Or set **Root Directory** to `Biosi` if you want the service scoped to the application folder.
+
+### Start command
+
+Railway is configured (via `railway.toml`) to run:
+
+```sh
+sh ./start.sh
+```
+
+`start.sh` starts the FastAPI app with Uvicorn and binds to Railway's `PORT` environment variable.
+Make sure the script is executable before committing:
+
+```bash
+chmod +x start.sh
+git add start.sh
+git commit -m "chore: mark start.sh executable"
+```
+
+### Environment variables
+
+Railway automatically injects `PORT`; the app binds to it via `${PORT:-8000}`.
+All other secrets must be set in Railway **Variables** — never committed to Git:
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | Async PostgreSQL URL (`postgresql+asyncpg://...`) |
+| `DATABASE_URL_DIRECT` | Direct (non-pooled) PostgreSQL URL for Alembic |
+| `SECRET_KEY` | Application secret key |
+| `OPENROUTER_API_KEY` | OpenRouter LLM API key |
+| `APP_ENV` | Set to `production` |
+
+### Deploy a new version
+
+```bash
+railway up --detach
+```
+
+### View logs
+
+```bash
+railway logs
+```
+
+### Update environment variables
+
+```bash
+railway variables set KEY="value"
+```
 
 ---
 
@@ -235,7 +322,98 @@ pytest tests/api/v1/test_health.py -v
 
 # Coverage report only
 pytest --cov=app --cov-report=html
+
+# Optional: integration-only run
+pytest tests/integration -v
 ```
+
+---
+
+## Milestone 6 Demo Flow (<5 Minutes)
+
+This is the fastest demo path for API-only walkthroughs.
+
+### 1) Start from project root and activate environment
+
+```bash
+cd /Users/fareedkhan/Dev/personal/Biosimilar/Biosi
+source .venv/bin/activate
+```
+
+### 2) Apply migrations
+
+```bash
+alembic upgrade head
+```
+
+### 3) Seed reference + demo data
+
+```bash
+python -m app.db.seed
+python -m scripts.seeddemodata
+```
+
+### 4) Start API
+
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+### 5) Validate health and open docs
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/health | jq
+```
+
+- Swagger UI: http://127.0.0.1:8000/docs
+- ReDoc: http://127.0.0.1:8000/redoc
+
+### 6) Demo API sequence (copy/paste)
+
+```bash
+# List events (shows seeded demo records)
+curl -s "http://127.0.0.1:8000/api/v1/events" | jq
+
+# Dashboard summary
+curl -s "http://127.0.0.1:8000/api/v1/dashboards/summary" | jq
+
+# Highest-risk events first
+curl -s "http://127.0.0.1:8000/api/v1/dashboards/top-threats" | jq
+
+# Latest events first
+curl -s "http://127.0.0.1:8000/api/v1/dashboards/recent-events" | jq
+
+# Pending review queue
+curl -s "http://127.0.0.1:8000/api/v1/dashboards/review-queue" | jq
+```
+
+### 7) What to point out during the demo
+
+- `events`: includes **Amgen ABP 206**, **Henlius HLX18**, and **India launch-style** narrative.
+- `summary`: shows total volume and split by review status/traffic light.
+- `top-threats`: surfaces highest-risk rows first for decision support.
+- `recent-events`: confirms latest activity ordering.
+- `review-queue`: highlights pending analyst workload.
+
+Optional short review action in Swagger:
+- Approve/reject one event via `/api/v1/events/{event_id}/approve` or `/reject`.
+- Refresh `/dashboards/summary` and `/dashboards/review-queue` to show state change.
+
+---
+
+## Workflow Automation
+
+Biosi supports three API-driven workflow patterns for operational automation:
+
+- Daily ClinicalTrials.gov ingestion
+- Approved Red event alerting
+- Weekly summary digest
+
+The current documented implementation uses n8n for scheduling, API calls, filtering, and notifications. The workflow logic is API-first and remains portable to other orchestration tools (for example Make, Airflow, GitHub Actions, or scripts) if tooling changes later.
+
+> The Biosi API is permanently hosted on Railway. n8n workflows call https://biosi-production.up.railway.app directly — no ngrok or local server required.
+
+For detailed node-by-node setup, payloads, filter logic, failure handling, and manual test steps, see [docs/n8n-workflows.md](docs/n8n-workflows.md).
 
 ---
 
@@ -262,14 +440,17 @@ pre-commit run --all-files
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `APP_ENV` | No | `dev` | `dev` \| `staging` \| `production` \| `test` |
+| `PORT` | No | `8000` | Auto-injected by Railway for the uvicorn bind port |
 | `SECRET_KEY` | **Yes** | — | Min 32-char random string |
 | `DATABASE_URL` | **Yes** | — | Pooled asyncpg URL for runtime |
 | `DATABASE_URL_DIRECT` | **Yes** | — | Direct psycopg URL for migrations |
 | `CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:8000` | Comma-separated allowed origins |
 | `OPENROUTER_API_KEY` | No | — | OpenRouter key (Milestone 3+) |
-| `OPENROUTER_MODEL_PRIMARY` | No | `anthropic/claude-3.7-sonnet` | Primary LLM model |
-| `OPENROUTER_MODEL_FALLBACK` | No | `google/gemini-2.0-flash-001` | Fallback LLM model |
-| `CLINICALTRIALS_BASE_URL` | No | `https://clinicaltrials.gov/api/query/studies` | ClinicalTrials API base |
+| `OPENROUTER_MODEL_PRIMARY` | No | `google/gemini-2.0-flash-001` | Primary LLM model |
+| `OPENROUTER_MODEL_FALLBACK` | No | `anthropic/claude-3.5-haiku` | Fallback LLM model |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1/chat/completions` | OpenRouter chat-completions endpoint |
+| `OPENROUTER_TIMEOUT_SECONDS` | No | `45` | Timeout for OpenRouter HTTP calls |
+| `CLINICALTRIALS_BASE_URL` | No | `https://clinicaltrials.gov/api/v2/studies` | ClinicalTrials API v2 base |
 | `N8N_WEBHOOK_BASE_URL` | No | — | n8n webhook base (Milestone 4+) |
 
 ---

@@ -10,12 +10,11 @@ async def test_health_returns_ok(client: AsyncClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["service"] == "Biosi"
-    assert "version" in body
+    assert set(body.keys()) == {"status"}
 
 
 @pytest.mark.anyio
 async def test_health_response_schema(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health")
     body = response.json()
-    assert set(body.keys()) == {"status", "service", "version"}
+    assert set(body.keys()) == {"status"}

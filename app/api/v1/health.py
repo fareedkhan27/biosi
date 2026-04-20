@@ -1,9 +1,15 @@
 from fastapi import APIRouter
+from datetime import datetime, timezone
 
+from fastapi import Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_db
 from app.core.config import settings
-from app.schemas.health import HealthResponse
+from app.schemas.health import HealthResponse, N8NHealthResponse
 
-router = APIRouter(tags=["Observability"])
+router = APIRouter(tags=["Observability/Health"])
 
 
 @router.get(
@@ -13,9 +19,26 @@ router = APIRouter(tags=["Observability"])
     responses={200: {"description": "Service is healthy"}},
 )
 async def health() -> HealthResponse:
-    """Returns service liveness status, name, and version."""
-    return HealthResponse(
+    """Returns minimal liveness payload for strict automation clients."""
+    return HealthResponse(status="ok")
+
+
+@router.get(
+    "/health/n8n",
+    summary="n8n orchestration health check",
+    response_model=N8NHealthResponse,
+    responses={200: {"description": "Service, DB, and config checks passed"}},
+)
+async def health_n8n(db: AsyncSession = Depends(get_db)) -> N8NHealthResponse:
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        raise HTTPException(status_code=503, detail="Database connectivity check failed") from exc
+
+    return N8NHealthResponse(
         status="ok",
-        service=settings.app_name,
+        db="connected",
+        openrouter="configured" if settings.openrouter_api_key else "not_configured",
         version=settings.service_version,
+        timestamp=datetime.now(timezone.utc),
     )

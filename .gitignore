@@ -33,3 +33,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Coverage
+.coverage
+coverage.xml
