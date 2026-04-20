@@ -1,5 +1,5 @@
 # ── Stage 1: dependency builder ───────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+FROM python:3.12.9-slim AS builder
 
 WORKDIR /build
 
@@ -8,7 +8,7 @@ RUN pip install --upgrade pip \
  && pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.12.9-slim AS runtime
 
 # Non-root user for security
 RUN addgroup --system biosi && adduser --system --ingroup biosi biosi
