@@ -1,5 +1,4 @@
-# ── Stage 1: dependency builder ─────────────────────────────────────────────
-# cache-bust: 2026-04-21b
+# ── Stage 1: dependency builder ───────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
@@ -11,25 +10,23 @@ RUN pip install --upgrade pip \
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
-# Non-root user for security
 RUN addgroup --system biosi && adduser --system --ingroup biosi biosi
 
 WORKDIR /app
 
-# Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application source (no .env baked in)
-# CACHE_BUST forces Docker to invalidate the COPY app layer on every change
-ARG CACHE_BUST=2026-04-21c
-RUN echo "cache-bust-2026-04-21d-distinct-on-fix" > /dev/null
+# Changing this value forces Railway to rebuild the app layer on every deploy.
+ARG CACHE_BUST=2026-04-21-v2
+RUN echo "$CACHE_BUST" > /dev/null
+
 COPY start.sh ./
 COPY app ./app
-# Purge any stale bytecode committed by accident
-RUN find /app -name '*.pyc' -delete && find /app -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 COPY alembic ./alembic
 COPY alembic.ini ./
 
+RUN find /app -name '*.pyc' -delete \
+ && find /app -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 RUN chmod 755 /app/start.sh
 
 USER biosi
@@ -39,4 +36,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import os, urllib.request; urllib.request.urlopen(f\"http://localhost:{os.getenv('PORT', '8000')}/api/v1/health\")"
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+CMD ["sh", "./start.sh"]
