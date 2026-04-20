@@ -255,7 +255,6 @@ async def get_top_threats(
 ) -> list[DashboardTopThreatItem]:
     stmt = (
         select(Event, Competitor.name, Competitor.headquarters_country)
-        .distinct(Event.id)
         .join(Competitor, Event.competitor_id == Competitor.id)
         .where(Event.threat_score.is_not(None))
     )
@@ -317,7 +316,6 @@ async def get_recent_events(
     # so that n8n Workflows 2 and 3 never silently miss qualifying rows.
     stmt = (
         select(Event, Competitor.name, Competitor.headquarters_country)
-        .distinct(Event.id)
         .join(Competitor, Event.competitor_id == Competitor.id)
     )
     stmt = _apply_non_competitor_name_filters(stmt)
@@ -371,7 +369,6 @@ async def get_review_queue(
 ) -> list[DashboardEventItem]:
     stmt = (
         select(Event, Competitor.name)
-        .distinct(Event.id)
         .join(Competitor, Event.competitor_id == Competitor.id)
         .where(Event.review_status == "pending")
     )
