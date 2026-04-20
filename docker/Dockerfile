@@ -20,6 +20,8 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application source (no .env baked in)
+# CACHE_BUST forces Docker to invalidate the COPY app layer on every change
+ARG CACHE_BUST=2026-04-21c
 COPY start.sh ./
 COPY app ./app
 # Purge any stale bytecode committed by accident

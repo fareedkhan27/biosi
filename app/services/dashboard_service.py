@@ -1,4 +1,7 @@
-"""Dashboard aggregation service backed by SQLAlchemy database queries."""
+"""Dashboard aggregation service backed by SQLAlchemy database queries.
+
+No DISTINCT ON — deduplication is handled by _dedupe_by_key after fetch.
+"""
 
 from __future__ import annotations
 
