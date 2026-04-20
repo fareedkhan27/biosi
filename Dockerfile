@@ -19,8 +19,12 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application source (no .env baked in)
+# Cache-bust: forces fresh COPY app layer (fixes DISTINCT ON regression 2026-04-21)
+RUN echo "cache-bust-2026-04-21-distinct-on-fix" > /dev/null
 COPY start.sh ./
 COPY app ./app
+# Purge any stale bytecode shipped by accident
+RUN find /app -name '*.pyc' -delete && find /app -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 COPY alembic ./alembic
 COPY alembic.ini ./
 
