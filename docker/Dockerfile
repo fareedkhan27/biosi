@@ -22,6 +22,7 @@ COPY --from=builder /install /usr/local
 # Copy application source (no .env baked in)
 # CACHE_BUST forces Docker to invalidate the COPY app layer on every change
 ARG CACHE_BUST=2026-04-21c
+RUN echo "cache-bust-2026-04-21d-distinct-on-fix" > /dev/null
 COPY start.sh ./
 COPY app ./app
 # Purge any stale bytecode committed by accident
