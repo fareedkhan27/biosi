@@ -1,3 +1,4 @@
+# Local development only — Railway uses Nixpacks (no root Dockerfile).
 # ── Stage 1: dependency builder ───────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
@@ -15,10 +16,6 @@ RUN addgroup --system biosi && adduser --system --ingroup biosi biosi
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
-
-# Changing this value forces Railway to rebuild the app layer on every deploy.
-ARG CACHE_BUST=2026-04-21-v2
-RUN echo "$CACHE_BUST" > /dev/null
 
 COPY start.sh ./
 COPY app ./app
