@@ -2,7 +2,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/app.dockerfile
       target: runtime
     image: biosi-web:latest
     container_name: biosi-web
