@@ -235,12 +235,12 @@ Production API URL: https://biosi-production.up.railway.app
 
 ### Service root directory
 
-Railway can be configured in either of these ways:
+This GitHub repository already has the application at the repository root.
 
-- Use the repository root as the service root. Railpack will detect the root-level `requirements.txt`, `start.sh`, and `railway.toml`.
-- Or set **Root Directory** to `Biosi` if you want the service scoped to the application folder.
+- In Railway, keep **Root Directory** empty / unset for this service.
+- Run Railway deployments from this `Biosi` directory when using the CLI.
 
-Railway deployment does not require Docker for this service. The production deploy path uses Railpack plus `start.sh`.
+Railway deployment uses the service config in this repository and does not require a separate parent-folder wrapper.
 
 ### Start command
 
@@ -277,6 +277,8 @@ All other secrets must be set in Railway **Variables** — never committed to Gi
 ```bash
 railway up --detach
 ```
+
+Run that command from the repository root, i.e. this `Biosi` directory.
 
 ### View logs
 
