@@ -1,0 +1,15 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.venv/
+.env
+.env.*
+.git/
+.github/
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+*.code-workspace
+tests/
+docs/
+scripts/
