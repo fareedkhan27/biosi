@@ -100,8 +100,9 @@ Biosi/
 ├── .gitignore
 ├── .pre-commit-config.yaml
 ├── alembic.ini
+├── docker/
+│   └── Dockerfile                # Local Docker image definition
 ├── docker-compose.yml
-├── Dockerfile                    # Multi-stage, non-root user
 ├── pyproject.toml                # ruff, mypy, pytest config
 ├── requirements.txt              # Runtime deps
 └── requirements-dev.txt          # Dev + CI deps
@@ -239,6 +240,8 @@ Railway can be configured in either of these ways:
 - Use the repository root as the service root. Railpack will detect the root-level `requirements.txt`, `start.sh`, and `railway.toml`.
 - Or set **Root Directory** to `Biosi` if you want the service scoped to the application folder.
 
+Railway deployment does not require Docker for this service. The production deploy path uses Railpack plus `start.sh`.
+
 ### Start command
 
 Railway is configured (via `railway.toml`) to run:
@@ -290,6 +293,8 @@ railway variables set KEY="value"
 ---
 
 ## Docker
+
+Docker is optional and intended for local development only. The local image definition lives at `docker/Dockerfile` so Railway can use Railpack without Dockerfile detection ambiguity.
 
 ```bash
 # Build & run
