@@ -20,11 +20,16 @@ from app.schemas.ingestion import (
     N8NWebhookIngestionResponse,
     PressReleaseIngestionRequest,
     PressReleaseIngestionResponse,
+    RecomputeScoresResponse,
 )
 from app.services.clinicaltrials_service import ClinicalTrialsIngestionService
 from app.services.event_service import create_event, update_event
 from app.services.press_release_service import PressReleaseIngestionService
-from app.services.scoring_service import assign_traffic_light, calculate_threat_score
+from app.services.scoring_service import (
+    assign_traffic_light,
+    calculate_threat_assessment,
+    calculate_threat_score,
+)
 
 router = APIRouter(tags=["Jobs"])
 
@@ -260,4 +265,76 @@ async def ingest_press_release_job(
         extracted_event=ExtractedEventPayload.model_validate(
             result.extracted_event.model_dump(mode="json")
         ),
+    )
+
+
+
+@router.post(
+    "/jobs/recompute-scores",
+    summary="Recompute threat scores for all events with LOE-aware multipliers",
+    response_model=RecomputeScoresResponse,
+)
+async def recompute_scores(
+    db: AsyncSession = Depends(get_db),
+) -> RecomputeScoresResponse:
+    """Batch-recalculate threat scores using the current scoring model.
+
+    This applies updated LOE proximity multipliers and regenerates
+    ``score_breakdown`` audit metadata for every scored event.
+    """
+    result = await db.execute(select(Event))
+    events = list(result.scalars().all())
+
+    processed = 0
+    updated = 0
+    skipped = 0
+    scores_before: list[float] = []
+    scores_after: list[float] = []
+
+    for event in events:
+        processed += 1
+        metadata = event.metadata_json or {}
+
+        # Skip events that were never scored (no threat_score and no scoring inputs)
+        if event.threat_score is None and not metadata.get("development_stage"):
+            skipped += 1
+            continue
+
+        scores_before.append(float(event.threat_score or 0))
+
+        assessment = calculate_threat_assessment(
+            event_type=event.event_type,
+            development_stage=metadata.get("development_stage"),
+            competitor_tier=metadata.get("competitor_tier"),
+            region=metadata.get("region"),
+            country=metadata.get("country"),
+            indication=metadata.get("indication"),
+            confidence_score=metadata.get("confidence_score"),
+            competitor_geography=metadata.get("competitor_geography"),
+        )
+
+        new_score = assessment["threat_score"]
+        new_light = assessment["traffic_light"]
+
+        if new_score != event.threat_score or new_light != event.traffic_light:
+            event.threat_score = new_score
+            event.traffic_light = new_light
+            metadata["score_breakdown"] = assessment["score_breakdown"]
+            event.metadata_json = metadata
+            updated += 1
+
+        scores_after.append(float(new_score))
+
+    await db.commit()
+
+    avg_before = round(sum(scores_before) / len(scores_before), 2) if scores_before else None
+    avg_after = round(sum(scores_after) / len(scores_after), 2) if scores_after else None
+
+    return RecomputeScoresResponse(
+        status="ok",
+        events_processed=processed,
+        events_updated=updated,
+        events_skipped=skipped,
+        avg_threat_score_before=avg_before,
+        avg_threat_score_after=avg_after,
     )

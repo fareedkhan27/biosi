@@ -108,3 +108,12 @@ class PressReleaseIngestionResponse(BaseModel):
     event_created: bool
     event_updated: bool
     extracted_event: ExtractedEventPayload
+
+
+class RecomputeScoresResponse(BaseModel):
+    status: Literal["ok"]
+    events_processed: int
+    events_updated: int
+    events_skipped: int
+    avg_threat_score_before: float | None = None
+    avg_threat_score_after: float | None = None

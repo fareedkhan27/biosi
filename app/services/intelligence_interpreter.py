@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.competitor import Competitor
 from app.models.event import Event
-from app.services.dashboard_service import _apply_non_competitor_name_filters
+from app.services.dashboard_service import _apply_non_competitor_name_filters, _normalize_review_status
 
 _GEO_CONTEXT = {
     "india": "market open (LOE expired)",
@@ -112,7 +112,8 @@ def _event_traffic_light(event: Event) -> str | None:
     value = _text(getattr(event, "traffic_light", None))
     if value is None:
         return None
-    canonical = value.capitalize()
+    cleaned = value.strip("\"'").strip().lower()
+    canonical = cleaned.capitalize()
     if canonical in {"Green", "Amber", "Red"}:
         return canonical
     return None
@@ -397,7 +398,7 @@ def _serialize_event(event: Event) -> dict[str, Any]:
         "title": event.title,
         "event_date": event.event_date.isoformat() if event.event_date is not None else None,
         "created_at": event.created_at.isoformat() if event.created_at is not None else None,
-        "review_status": getattr(event, "review_status", "pending"),
+        "review_status": _normalize_review_status(getattr(event, "review_status", "pending")),
         "threat_score": _event_score(event),
         "traffic_light": _event_traffic_light(event),
         "development_stage": _event_stage(event),
@@ -446,6 +447,9 @@ async def build_weekly_digest(
     counts = {"red": 0, "amber": 0, "green": 0}
 
     for event, competitor_name in rows:
+        normalized_status = _normalize_review_status(getattr(event, "review_status", None))
+        if normalized_status == "rejected":
+            continue
         setattr(event, "_intelligence_competitor_name", competitor_name)
         top_insights.append(_serialize_event(event))
 
@@ -470,4 +474,256 @@ async def build_weekly_digest(
         "top_insights": top_insights,
         "competitor_summary": competitor_summary,
         "counts": counts,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Department-specific intelligence briefings
+# ---------------------------------------------------------------------------
+
+_DEPARTMENT_LENSES: dict[str, str] = {
+    "regulatory": "Regulatory lens: prioritise approval pathways, filing timelines, and agency interactions.",
+    "commercial": "Commercial lens: prioritise market sizing, launch timing, and competitive share impact.",
+    "medical_affairs": "Medical Affairs lens: prioritise clinical evidence, indication expansion, and KOL sentiment.",
+    "market_access": "Market Access lens: prioritise reimbursement status, pricing pressure, and formulary positioning.",
+}
+
+_VALID_DEPARTMENTS = set(_DEPARTMENT_LENSES.keys())
+
+
+def _department_frame(event: Event, department: str) -> str:
+    """Re-frame a single event insight for a specific department."""
+    insight = build_event_insight(event)
+    base_summary = insight.get("summary") or "No summary available"
+    score = _event_score(event)
+    stage = _event_stage(event) or "unknown stage"
+    indication = _event_indication(event) or "unknown indication"
+    country = _event_country(event) or "unknown geography"
+
+    if department == "regulatory":
+        if score >= 75:
+            return (
+                f"High-priority regulatory signal: {base_summary}. "
+                f"Monitor {stage} progression in {country} for accelerated-review eligibility."
+            )
+        return (
+            f"Regulatory watch: {base_summary}. Track {stage} milestones in {country}."
+        )
+
+    if department == "commercial":
+        if score >= 75:
+            return (
+                f"Near-term commercial threat: {base_summary}. "
+                f"Assess revenue-at-risk in {country} and prepare launch-readiness response."
+            )
+        return (
+            f"Commercial monitor: {base_summary}. Evaluate {indication} overlap and timing."
+        )
+
+    if department == "medical_affairs":
+        if score >= 75:
+            return (
+                f"High-impact clinical signal: {base_summary}. "
+                f"Engage KOLs in {country} and prepare scientific narrative for {indication}."
+            )
+        return (
+            f"Clinical pipeline watch: {base_summary}. Track evidence generation for {indication}."
+        )
+
+    if department == "market_access":
+        if score >= 75:
+            return (
+                f"Urgent access risk: {base_summary}. "
+                f"Evaluate pricing and reimbursement implications in {country}."
+            )
+        return (
+            f"Access landscape monitor: {base_summary}. Review HTA pathway in {country}."
+        )
+
+    return base_summary
+
+
+def _build_market_sections(
+    events: list[Event],
+    department: str,
+) -> list[dict[str, str]]:
+    """Generate department-specific market sections from a set of events."""
+    if not events:
+        return []
+
+    red_count = sum(1 for e in events if _event_traffic_light(e) == "Red")
+    amber_count = sum(1 for e in events if _event_traffic_light(e) == "Amber")
+    high_score_events = [e for e in events if _event_score(e) >= 75]
+
+    sections: list[dict[str, str]] = []
+
+    if department == "regulatory":
+        sections.append({
+            "section_title": "Regulatory Pipeline Overview",
+            "body": (
+                f"{red_count} late-stage signals require immediate regulatory surveillance. "
+                f"{amber_count} mid-stage programs are in active watch. "
+                f"Focus agency engagement on the top {len(high_score_events)} high-threat competitors."
+            ),
+            "priority": "high" if red_count > 0 else "medium",
+        })
+
+    elif department == "commercial":
+        sections.append({
+            "section_title": "Competitive Landscape Summary",
+            "body": (
+                f"{red_count} near-term competitive entries pose direct revenue risk. "
+                f"{amber_count} emerging threats are tracking toward launch windows. "
+                f"Recommend scenario planning for the {len(high_score_events)} highest-priority signals."
+            ),
+            "priority": "high" if red_count > 0 else "medium",
+        })
+
+    elif department == "medical_affairs":
+        sections.append({
+            "section_title": "Clinical Evidence & KOL Landscape",
+            "body": (
+                f"{red_count} high-priority clinical signals require scientific narrative preparation. "
+                f"{amber_count} mid-priority studies are generating data that may shift KOL sentiment. "
+                f"Advisory board planning recommended for the {len(high_score_events)} top threats."
+            ),
+            "priority": "high" if red_count > 0 else "medium",
+        })
+
+    elif department == "market_access":
+        sections.append({
+            "section_title": "Access & Reimbursement Risk Summary",
+            "body": (
+                f"{red_count} high-priority signals indicate imminent pricing pressure. "
+                f"{amber_count} mid-term threats may reshape formulary positioning. "
+                f"HTA and payer engagement recommended for the {len(high_score_events)} top threats."
+            ),
+            "priority": "high" if red_count > 0 else "medium",
+        })
+
+    return sections
+
+
+def _build_milestones(events: list[Event]) -> list[dict[str, str | None]]:
+    """Extract upcoming milestone-like events sorted by date."""
+    scored_events = sorted(
+        [e for e in events if e.event_date is not None and _event_score(e) >= 45],
+        key=lambda e: (e.event_date, _event_score(e)),
+        reverse=False,
+    )
+
+    milestones: list[dict[str, str | None]] = []
+    for event in scored_events[:10]:
+        stage = _event_stage(event)
+        m_type = "milestone"
+        if stage in {"launch", "approval", "approved", "market"}:
+            m_type = "launch/approval"
+        elif "phase 3" in (stage or "").lower():
+            m_type = "phase_3"
+        elif "phase 2" in (stage or "").lower():
+            m_type = "phase_2"
+
+        milestones.append({
+            "date": event.event_date.isoformat() if event.event_date else None,
+            "competitor_name": _event_competitor_name(event),
+            "title": event.title,
+            "milestone_type": m_type,
+            "priority": "high" if _event_score(event) >= 75 else "medium",
+        })
+
+    return milestones
+
+
+def _build_executive_summary(
+    events: list[Event],
+    department: str,
+) -> str:
+    """Generate a one-paragraph executive summary tailored to the department."""
+    if not events:
+        return f"No competitive signals require attention for the {department} team this period."
+
+    red_count = sum(1 for e in events if _event_traffic_light(e) == "Red")
+    top_competitor = ""
+    top_score = 0
+    for e in events:
+        s = _event_score(e)
+        if s > top_score:
+            top_score = s
+            top_competitor = _event_competitor_name(e)
+
+    lens = _DEPARTMENT_LENSES.get(department, "")
+
+    if red_count == 0:
+        return (
+            f"{lens} No immediate high-priority threats identified. "
+            f"Monitor pipeline activity from {top_competitor or 'key competitors'} and maintain readiness."
+        )
+
+    return (
+        f"{lens} {red_count} high-priority signal(s) detected, led by {top_competitor} "
+        f"(threat score {top_score}). Immediate department action is recommended."
+    )
+
+
+async def build_department_briefing(
+    session: AsyncSession,
+    department: str,
+    *,
+    limit: int = 50,
+    approved_only: bool = False,
+) -> dict[str, Any]:
+    """Return a structured, department-specific intelligence briefing."""
+
+    if department not in _VALID_DEPARTMENTS:
+        raise ValueError(
+            f"Invalid department '{department}'. Valid: {', '.join(sorted(_VALID_DEPARTMENTS))}"
+        )
+
+    stmt = (
+        select(Event, Competitor.name)
+        .join(Competitor, Event.competitor_id == Competitor.id)
+        .where(Event.threat_score.is_not(None))
+    )
+    stmt = _apply_non_competitor_name_filters(stmt)
+
+    if approved_only:
+        stmt = stmt.where(Event.review_status == "approved")
+    else:
+        stmt = stmt.where(Event.review_status != "rejected")
+
+    stmt = stmt.order_by(
+        Event.threat_score.desc().nullslast(),
+        Event.event_date.desc().nullslast(),
+        Event.id,
+    ).limit(limit)
+
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    events: list[Event] = []
+    for event, competitor_name in rows:
+        setattr(event, "_intelligence_competitor_name", competitor_name)
+        events.append(event)
+
+    event_cards: list[dict[str, Any]] = []
+    for event in events:
+        insight = build_event_insight(event)
+        event_cards.append({
+            "id": str(event.id),
+            "competitor_name": _event_competitor_name(event),
+            "title": event.title,
+            "threat_score": _event_score(event),
+            "traffic_light": _event_traffic_light(event) or "Green",
+            "department_frame": _department_frame(event, department),
+            "recommended_action": insight.get("recommended_action"),
+            "event_date": event.event_date.isoformat() if event.event_date else None,
+        })
+
+    return {
+        "department": department,
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "executive_summary": _build_executive_summary(events, department),
+        "market_sections": _build_market_sections(events, department),
+        "event_cards": event_cards,
+        "milestones": _build_milestones(events),
     }

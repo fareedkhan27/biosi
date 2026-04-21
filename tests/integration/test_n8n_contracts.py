@@ -473,6 +473,7 @@ def _mock_unscored_approved_event_session(mock_db_session: AsyncMock) -> None:
     event.review_status = "approved"
     event.threat_score = None   # not yet scored
     event.traffic_light = None  # not yet scored
+    event.metadata_json = None
 
     execute_result = MagicMock()
     execute_result.all = MagicMock(return_value=[(event, "Henlius")])
@@ -523,6 +524,7 @@ def _mock_recent_events_malformed_status_session(
     event.review_status = review_status
     event.threat_score = 55
     event.traffic_light = traffic_light
+    event.metadata_json = None
 
     execute_result = MagicMock()
     execute_result.all = MagicMock(return_value=[(event, "Amgen")])
@@ -570,3 +572,79 @@ async def test_recent_events_serializes_all_valid_review_statuses(
     items = response.json()
     assert len(items) == 1
     assert items[0]["review_status"] == status
+
+
+# ---------------------------------------------------------------------------
+# Weekly digest: malformed rejected events must be excluded
+# GET /api/v1/intelligence/weekly-digest-v2
+# ---------------------------------------------------------------------------
+
+N8N_WEEKLY_DIGEST_REQUIRED_FIELDS = {
+    "generated_at",
+    "top_insights",
+    "competitor_summary",
+    "counts",
+}
+
+
+def _mock_weekly_digest_malformed_rejected_session(mock_db_session: AsyncMock) -> None:
+    """Return one rejected event with quoted review_status and one approved event."""
+    import uuid
+    import datetime
+
+    rejected_event = MagicMock()
+    rejected_event.id = uuid.uuid4()
+    rejected_event.competitor_id = uuid.uuid4()
+    rejected_event.event_type = "clinical_trial_update"
+    rejected_event.title = "Malformed rejected event"
+    rejected_event.event_date = datetime.date(2026, 4, 1)
+    rejected_event.created_at = datetime.datetime(2026, 4, 19, 7, 0, 0, tzinfo=datetime.timezone.utc)
+    rejected_event.review_status = "'rejected'"
+    rejected_event.threat_score = 90
+    rejected_event.traffic_light = "Red"
+    rejected_event.metadata_json = {"indication": "NSCLC"}
+
+    approved_event = MagicMock()
+    approved_event.id = uuid.uuid4()
+    approved_event.competitor_id = uuid.uuid4()
+    approved_event.event_type = "clinical_trial_update"
+    approved_event.title = "Approved event"
+    approved_event.event_date = datetime.date(2026, 4, 2)
+    approved_event.created_at = datetime.datetime(2026, 4, 20, 7, 0, 0, tzinfo=datetime.timezone.utc)
+    approved_event.review_status = "approved"
+    approved_event.threat_score = 70
+    approved_event.traffic_light = "Amber"
+    approved_event.metadata_json = {"indication": "RCC"}
+
+    execute_result = MagicMock()
+    execute_result.all = MagicMock(return_value=[
+        (rejected_event, "BadActor"),
+        (approved_event, "Amgen"),
+    ])
+    mock_db_session.execute = AsyncMock(return_value=execute_result)
+
+
+@pytest.mark.anyio
+async def test_weekly_digest_excludes_malformed_rejected_events(
+    client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """Malformed rejected status like "'rejected'" must NOT appear in weekly digest."""
+    _mock_weekly_digest_malformed_rejected_session(mock_db_session)
+    response = await client.get("/api/v1/intelligence/weekly-digest-v2")
+    assert response.status_code == 200
+
+    body = response.json()
+    missing = N8N_WEEKLY_DIGEST_REQUIRED_FIELDS - set(body.keys())
+    assert not missing, f"Weekly digest fields missing: {missing}"
+
+    insights = body["top_insights"]
+    assert len(insights) == 1, "Only the approved event should be present"
+    assert insights[0]["review_status"] == "approved"
+    assert insights[0]["competitor_name"] == "Amgen"
+
+    # The rejected event should not be counted in traffic light totals
+    counts = body["counts"]
+    assert counts["red"] == 0
+    assert counts["amber"] == 1
+    assert counts["green"] == 0

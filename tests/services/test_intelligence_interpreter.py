@@ -4,7 +4,11 @@ import uuid
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
-from app.services.intelligence_interpreter import build_competitor_summary, build_event_insight
+from app.services.intelligence_interpreter import (
+    _event_traffic_light,
+    build_competitor_summary,
+    build_event_insight,
+)
 
 
 def _make_event(
@@ -186,3 +190,45 @@ def test_build_competitor_summary_uses_highest_scoring_event() -> None:
     assert summary["max_score"] == 82
     assert summary["top_indication"] == "NSCLC"
     assert "Supported by 2 events in the current digest." in summary["summary"]
+
+
+def test_event_traffic_light_normalizes_quoted_values() -> None:
+    """Quoted DB values like "'red'" must normalize to canonical Red/Amber/Green."""
+    event = _make_event()
+
+    event.traffic_light = "'red'"
+    assert _event_traffic_light(event) == "Red"
+
+    event.traffic_light = "'amber'"
+    assert _event_traffic_light(event) == "Amber"
+
+    event.traffic_light = "'green'"
+    assert _event_traffic_light(event) == "Green"
+
+
+def test_event_traffic_light_normalizes_lowercase_values() -> None:
+    """Lowercase DB values must normalize to canonical title case."""
+    event = _make_event()
+
+    event.traffic_light = "red"
+    assert _event_traffic_light(event) == "Red"
+
+    event.traffic_light = "amber"
+    assert _event_traffic_light(event) == "Amber"
+
+    event.traffic_light = "green"
+    assert _event_traffic_light(event) == "Green"
+
+
+def test_event_traffic_light_returns_none_for_garbage_input() -> None:
+    """Unparseable traffic light values must return None, not crash."""
+    event = _make_event()
+
+    event.traffic_light = "'yellow'"
+    assert _event_traffic_light(event) is None
+
+    event.traffic_light = ""
+    assert _event_traffic_light(event) is None
+
+    event.traffic_light = None
+    assert _event_traffic_light(event) is None

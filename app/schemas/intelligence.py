@@ -50,3 +50,37 @@ class WeeklyDigestResponse(BaseModel):
     top_insights: list[IntelligenceInsightItem]
     competitor_summary: list[CompetitorSummaryItem]
     counts: WeeklyDigestCounts
+
+
+class MilestoneItem(BaseModel):
+    date: str | None
+    competitor_name: str
+    title: str
+    milestone_type: str
+    priority: str
+
+
+class EventCardItem(BaseModel):
+    id: str
+    competitor_name: str
+    title: str
+    threat_score: int
+    traffic_light: str
+    department_frame: str
+    recommended_action: str | None
+    event_date: str | None
+
+
+class MarketSectionItem(BaseModel):
+    section_title: str
+    body: str
+    priority: str
+
+
+class DepartmentBriefingResponse(BaseModel):
+    department: str
+    generated_at: str
+    executive_summary: str
+    market_sections: list[MarketSectionItem]
+    event_cards: list[EventCardItem]
+    milestones: list[MilestoneItem]

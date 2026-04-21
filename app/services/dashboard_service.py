@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import TypedDict
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.competitor import Competitor
@@ -229,7 +229,8 @@ async def get_summary(session: AsyncSession) -> DashboardSummaryResponse:
 
     review_status_counts: dict[str, int] = {}
     for status, count in review_status_result.all():
-        review_status_counts[status] = int(count)
+        normalized = _normalize_review_status(status)
+        review_status_counts[normalized] = review_status_counts.get(normalized, 0) + int(count)
 
     approved = review_status_counts.get("approved", 0)
     pending = review_status_counts.get("pending", 0)
@@ -247,7 +248,10 @@ async def get_summary(session: AsyncSession) -> DashboardSummaryResponse:
     for traffic_light, count in traffic_light_result.all():
         if traffic_light is None:
             continue
-        by_traffic_light[traffic_light] = int(count)
+        normalized = _normalize_traffic_light(traffic_light)
+        if normalized is None:
+            continue
+        by_traffic_light[normalized] = by_traffic_light.get(normalized, 0) + int(count)
 
     return DashboardSummaryResponse(
         total_events=total_events,
@@ -381,7 +385,14 @@ async def get_review_queue(
     stmt = (
         select(Event, Competitor.name)
         .join(Competitor, Event.competitor_id == Competitor.id)
-        .where(Event.review_status == "pending")
+        .where(
+            or_(
+                Event.review_status == "pending",
+                Event.review_status == "'pending'",
+                Event.review_status == '"pending"',
+                Event.review_status == "Pending",
+            )
+        )
     )
     stmt = _apply_non_competitor_name_filters(stmt)
     stmt = (

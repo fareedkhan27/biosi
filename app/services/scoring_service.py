@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from app.core.loe_config import apply_loe_multiplier_to_geography_score
+
 
 class ScoreBreakdown(TypedDict):
     stage: int
@@ -195,8 +197,10 @@ def _score_geography(
     )
     if geography_key is None:
         flags.append("missing_geography")
-        return _GEOGRAPHY_WEIGHTS["unknown"], flags
-    return _GEOGRAPHY_WEIGHTS.get(geography_key, _GEOGRAPHY_WEIGHTS["other"]), flags
+        base_score = _GEOGRAPHY_WEIGHTS["unknown"]
+        return apply_loe_multiplier_to_geography_score(base_score, "unknown"), flags
+    base_score = _GEOGRAPHY_WEIGHTS.get(geography_key, _GEOGRAPHY_WEIGHTS["other"])
+    return apply_loe_multiplier_to_geography_score(base_score, geography_key), flags
 
 
 def _score_indication(indication: str | None) -> tuple[int, list[str]]:

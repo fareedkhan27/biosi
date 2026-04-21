@@ -134,7 +134,8 @@ def test_tier_one_scores_higher_than_tier_four() -> None:
     assert tier_one_score > tier_four_score
 
 
-def test_phase_one_high_priority_case_cannot_be_red() -> None:
+def test_phase_one_india_can_be_red_with_loe_multiplier() -> None:
+    """India LOE is expired; even Phase 1 can hit Red due to 2.0 geography multiplier."""
     score = calculate_threat_score(
         development_stage="Phase 1",
         competitor_tier=1,
@@ -143,8 +144,26 @@ def test_phase_one_high_priority_case_cannot_be_red() -> None:
         indication="NSCLC",
     )
 
+    # India geography base=20 * LOE multiplier 2.0 = 30 (capped)
+    # 8 + 20 + 30 + 15 + 5 = 78
+    assert score >= 75
+    assert assign_traffic_light(score) == "Red"
+
+
+def test_phase_one_usa_still_amber_without_loe_boost() -> None:
+    """US LOE is ~2028; 1.6 multiplier keeps Phase 1 in Amber territory."""
+    score = calculate_threat_score(
+        development_stage="Phase 1",
+        competitor_tier=1,
+        confidence_score=95,
+        country="United States",
+        indication="NSCLC",
+    )
+
+    # US geography base=16 * LOE multiplier 1.6 = 26 (rounded)
+    # 8 + 20 + 26 + 15 + 5 = 74
     assert score < 75
-    assert assign_traffic_light(score) != "Red"
+    assert assign_traffic_light(score) == "Amber"
 
 
 def test_assessment_returns_auditable_breakdown() -> None:
@@ -157,6 +176,7 @@ def test_assessment_returns_auditable_breakdown() -> None:
     )
 
     assert assessment["score_breakdown"]["stage"] == 24
-    assert assessment["score_breakdown"]["geography"] == 20
+    # India LOE expired → 2.0 multiplier: 20 * 2.0 = 30 (capped at 30)
+    assert assessment["score_breakdown"]["geography"] == 30
     assert "missing_competitor_profile" in assessment["score_breakdown"]["flags"]
     assert "missing_indication" in assessment["score_breakdown"]["flags"]

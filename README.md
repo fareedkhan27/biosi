@@ -215,13 +215,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/v1/health` | Liveness check |
+| `GET /api/v1/health` | Liveness check (verifies DB connectivity) |
+| `GET /api/v1/health/n8n` | Deep health check with DB + OpenRouter config |
 | `POST /api/v1/jobs/ingest/clinicaltrials` | Run ClinicalTrials.gov API v2 ingestion |
 | `POST /api/v1/jobs/ingest/press-release` | Extract and ingest a press-release event via OpenRouter |
+| `POST /api/v1/jobs/recompute-scores` | Batch-recalculate threat scores with LOE-aware multipliers |
 | `GET /api/v1/dashboards/summary` | Dashboard totals by review status + traffic light |
 | `GET /api/v1/dashboards/top-threats` | Highest-risk events first |
 | `GET /api/v1/dashboards/recent-events` | Most recent events first |
 | `GET /api/v1/dashboards/review-queue` | Pending analyst review queue |
+| `GET /api/v1/intelligence/digest` | Bundled email-ready payload for n8n |
+| `GET /api/v1/intelligence/weekly-digest-v2` | Interpreted weekly digest with insights |
+| `POST /api/v1/intelligence/generate-briefings` | Department-specific intelligence briefing |
 | `GET /docs` | Swagger UI (dev/staging only) |
 | `GET /redoc` | ReDoc (dev/staging only) |
 
@@ -229,7 +234,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 ## Deployment on Railway
 
-Biosi is deployed on Railway using **Railpack** (the default Railway builder).
+Biosi is deployed on Railway using **Nixpacks (Railpack)**.
 
 Production API URL: https://biosi-production.up.railway.app
 
@@ -241,6 +246,35 @@ This GitHub repository already has the application at the repository root.
 - Run Railway deployments from this `Biosi` directory when using the CLI.
 
 Railway deployment uses the service config in this repository and does not require a separate parent-folder wrapper.
+
+### Resolved deployment incident (2026-04-21)
+
+#### What actually happened (full picture)
+
+The production issue was **not** caused by application code, Dockerfile logic, or builder type.
+
+The root cause was a Railway service-level setting:
+
+- `rootDirectory: "Biosi"`
+
+Railway was searching for a `Biosi/` subdirectory inside the repository on each deploy. Since the repository root is already the project root, that path did not exist. Deployments then failed and Railway kept serving the last successful deployment (which still had the old `DISTINCT ON` query behavior).
+
+That is why previous cache-busting and builder-switch attempts did not resolve production behavior at the time.
+
+#### What was fixed
+
+| Fix | How |
+|---|---|
+| `rootDirectory: "Biosi"` cleared | Railway API `serviceInstanceUpdate` |
+| Builder confirmed as Railpack/Nixpacks | Already correct |
+| `railway.toml` aligned | `builder = "NIXPACKS"` |
+| `docker/Dockerfile` retained for local Docker workflows | `docker-compose.yml` continues to reference it |
+
+#### Current state
+
+- Deployment status: **SUCCESS**
+- `/api/v1/intelligence/digest` returns real data
+- No PostgreSQL `DISTINCT ON` runtime errors
 
 ### Start command
 
@@ -343,7 +377,7 @@ This is the fastest demo path for API-only walkthroughs.
 ### 1) Start from project root and activate environment
 
 ```bash
-cd /Users/fareedkhan/Dev/personal/Biosimilar/Biosi
+cd /Users/fareedkhan/Dev/personal/Biosi
 source .venv/bin/activate
 ```
 

@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.schemas.intelligence import WeeklyDigestResponse
+from app.schemas.intelligence import DepartmentBriefingResponse, WeeklyDigestResponse
 from app.services import dashboard_service
-from app.services.intelligence_interpreter import build_weekly_digest
+from app.services.intelligence_interpreter import build_department_briefing, build_weekly_digest
 
 logger = logging.getLogger(__name__)
 
@@ -84,3 +84,20 @@ async def get_weekly_digest_v2(
 ) -> WeeklyDigestResponse:
     payload = await build_weekly_digest(db, limit=limit, approved_only=approved_only)
     return WeeklyDigestResponse.model_validate(payload)
+
+
+@router.post("/generate-briefings", response_model=DepartmentBriefingResponse)
+async def generate_briefings(
+    department: str = Query(..., description="Department lens: regulatory, commercial, medical_affairs, market_access"),
+    limit: int = Query(50, ge=1, le=100),
+    approved_only: bool = False,
+    db: AsyncSession = Depends(get_db),
+) -> DepartmentBriefingResponse:
+    """Generate a department-specific intelligence briefing."""
+    try:
+        payload = await build_department_briefing(
+            db, department=department, limit=limit, approved_only=approved_only
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DepartmentBriefingResponse.model_validate(payload)

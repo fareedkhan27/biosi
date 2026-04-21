@@ -1,6 +1,7 @@
 """Integration tests for health endpoints."""
 
 from __future__ import annotations
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
@@ -59,3 +60,15 @@ async def test_health_is_idempotent(client: AsyncClient) -> None:
 async def test_health_content_type_is_json(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health")
     assert "application/json" in response.headers.get("content-type", "")
+
+
+@pytest.mark.anyio
+async def test_health_returns_503_when_db_down(
+    client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """If database connectivity fails, /health must return 503."""
+    mock_db_session.execute = AsyncMock(side_effect=ConnectionError("DB is down"))
+    response = await client.get("/api/v1/health")
+    assert response.status_code == 503
+    assert "Database connectivity check failed" in response.json()["detail"]

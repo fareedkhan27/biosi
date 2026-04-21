@@ -16,10 +16,17 @@ router = APIRouter(tags=["Observability/Health"])
     "/health",
     summary="Health check",
     response_model=HealthResponse,
-    responses={200: {"description": "Service is healthy"}},
+    responses={
+        200: {"description": "Service and DB are healthy"},
+        503: {"description": "Database connectivity check failed"},
+    },
 )
-async def health() -> HealthResponse:
-    """Returns minimal liveness payload for strict automation clients."""
+async def health(db: AsyncSession = Depends(get_db)) -> HealthResponse:
+    """Returns liveness payload; verifies database connectivity."""
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        raise HTTPException(status_code=503, detail="Database connectivity check failed") from exc
     return HealthResponse(status="ok")
 
 

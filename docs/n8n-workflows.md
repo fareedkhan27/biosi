@@ -278,3 +278,228 @@ This design keeps n8n free of intelligence logic, while preserving auditability 
 - [ ] Success and failure notifications are both tested.
 - [ ] Optional no-results/no-activity behavior is intentionally chosen.
 - [ ] Schedules are enabled only after manual tests pass.
+
+
+---
+
+## Workflow 5 — Email Intelligence Digest (Milestone 8)
+
+### Purpose
+
+Send department-specific or generic intelligence briefings via email using the backend `generate-briefings` endpoint.
+
+### Trigger
+
+- Schedule Trigger (example: Monday 08:00 local for weekly; daily 07:00 for daily)
+- Optional: Webhook trigger for on-demand briefings
+
+### Exact API endpoints used
+
+1. `GET /api/v1/health` (DB-verified health check)
+2. `POST /api/v1/intelligence/generate-briefings?department={dept}`
+3. Optional: `GET /api/v1/dashboards/summary` for header stats
+
+### Key parameters
+
+- `department` (required): `regulatory` | `commercial` | `medical_affairs` | `market_access`
+- `limit` (1..100, typical 50)
+- `approved_only` (ops policy choice)
+
+### Data flow
+
+1. Health check gate (`GET /api/v1/health`).
+2. Call `generate-briefings` for each configured department (or once for generic).
+3. Backend returns structured JSON:
+   - `executive_summary`
+   - `market_sections[]`
+   - `event_cards[]`
+   - `milestones[]`
+4. n8n maps the JSON into an HTML email template.
+5. Email is routed based on `department` + `region` (see Regional Routing below).
+6. Failure branch sends alert to ops channel.
+
+### Workflow JSON (simplified n8n node structure)
+
+```json
+{
+  "name": "Biosi Email Intelligence Digest",
+  "nodes": [
+    {
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "name": "Weekly Schedule",
+      "parameters": { "rule": { "interval": [{ "field": "weeks", "value": 1 }] } }
+    },
+    {
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Health Check",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BIOSI_API_BASE_URL }}/api/v1/health"
+      }
+    },
+    {
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Generate Briefing",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BIOSI_API_BASE_URL }}/api/v1/intelligence/generate-briefings",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "department", "value": "={{ $json.department }}" },
+            { "name": "limit", "value": "50" },
+            { "name": "approved_only", "value": "false" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "n8n-nodes-base.code",
+      "name": "Build HTML Email",
+      "parameters": {
+        "jsCode": "// See HTML Email Format section below\nreturn items;"
+      }
+    },
+    {
+      "type": "n8n-nodes-base.emailSend",
+      "name": "Send Email",
+      "parameters": {
+        "toEmail": "={{ $json.recipient_email }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html_body }}"
+      }
+    }
+  ]
+}
+```
+
+### HTML Email Format
+
+The email template consumes `generate-briefings` JSON and produces a responsive HTML layout.
+
+**Required template variables:**
+
+| Variable | Source JSON field |
+|---|---|
+| `{{ executive_summary }}` | `executive_summary` |
+| `{{ department }}` | `department` |
+| `{{ generated_at }}` | `generated_at` |
+| `{{ red_count }}` | Count of `event_cards` where `traffic_light == "Red"` |
+| `{{ amber_count }}` | Count of `event_cards` where `traffic_light == "Amber"` |
+| `{{ event_cards }}` | Array of `event_cards` |
+| `{{ market_sections }}` | Array of `market_sections` |
+| `{{ milestones }}` | Array of `milestones` |
+
+**HTML structure (simplified):**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    .red { color: #c0392b; }
+    .amber { color: #e67e22; }
+    .green { color: #27ae60; }
+    .card { border-left: 4px solid #ccc; padding: 12px; margin: 8px 0; }
+    .card.red { border-left-color: #c0392b; }
+  </style>
+</head>
+<body>
+  <h1>{{ department | title }} Intelligence Briefing</h1>
+  <p><strong>Generated:</strong> {{ generated_at }}</p>
+  <p class="summary">{{ executive_summary }}</p>
+
+  <h2>Threat Overview</h2>
+  <p>🔴 {{ red_count }} Red &nbsp; 🟠 {{ amber_count }} Amber</p>
+
+  <h2>Key Events</h2>
+  {% for card in event_cards %}
+  <div class="card {{ card.traffic_light | lower }}">
+    <strong>{{ card.competitor_name }}</strong> — {{ card.title }}<br>
+    <span class="score">Score: {{ card.threat_score }}</span><br>
+    <em>{{ card.department_frame }}</em><br>
+    {% if card.recommended_action %}
+    <small>Action: {{ card.recommended_action }}</small>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <h2>Upcoming Milestones</h2>
+  <ul>
+    {% for m in milestones %}
+    <li><strong>{{ m.date }}</strong> — {{ m.competitor_name }}: {{ m.title }} ({{ m.priority }})</li>
+    {% endfor %}
+  </ul>
+
+  <hr>
+  <small>Automated by Biosi Intelligence Platform</small>
+</body>
+</html>
+```
+
+> **Note:** n8n's native `Email Send` node supports HTML bodies directly. If using a custom SMTP node, ensure `Content-Type: text/html; charset=utf-8` is set.
+
+### Regional Routing Logic
+
+Route emails to different distribution lists based on event geography concentration:
+
+| Rule | Recipient List | Condition |
+|---|---|---|
+| **NA Priority** | `na-team@company.com` | ≥ 40% of Red events have `country == "United States"` or `region == "North America"` |
+| **EU Priority** | `eu-team@company.com` | ≥ 40% of Red events have `region == "Europe"` |
+| **APAC Priority** | `apac-team@company.com` | ≥ 40% of Red events have `region == "Asia-Pacific"` |
+| **Global Default** | `global-ci@company.com` | No region dominates; or generic briefing |
+
+**n8n routing node (Code node):**
+
+```javascript
+const cards = $input.first().json.event_cards || [];
+const redCards = cards.filter(c => c.traffic_light === 'Red');
+
+function regionOf(card) {
+  const meta = card.metadata_json || {};
+  return (meta.region || '').toLowerCase();
+}
+
+const naCount = redCards.filter(c => regionOf(c).includes('north america')).length;
+const euCount = redCards.filter(c => regionOf(c).includes('europe')).length;
+const apacCount = redCards.filter(c => regionOf(c).includes('asia')).length;
+const totalRed = redCards.length || 1;
+
+let recipient = 'global-ci@company.com';
+if (naCount / totalRed >= 0.4) recipient = 'na-team@company.com';
+else if (euCount / totalRed >= 0.4) recipient = 'eu-team@company.com';
+else if (apacCount / totalRed >= 0.4) recipient = 'apac-team@company.com';
+
+return [{ json: { ...$input.first().json, recipient_email: recipient } }];
+```
+
+### Dependencies on backend logic
+
+- `generate-briefings` owns all department framing, market sections, and event cards.
+- n8n owns template rendering, routing logic, and delivery only.
+
+### Known limitations
+
+- Email size grows linearly with `limit`; recommend `limit <= 50` for email workflows.
+- No image/chart generation; plain HTML only.
+- Regional routing is heuristic-based (40% threshold); tune per ops feedback.
+
+---
+
+## Updated Endpoint Inventory
+
+| Endpoint | Method | Used By |
+|---|---|---|
+| `GET /api/v1/health` | GET | WF1, WF5 |
+| `GET /api/v1/health/n8n` | GET | WF1 (legacy) |
+| `POST /api/v1/jobs/ingest/clinicaltrials` | POST | WF1 |
+| `POST /api/v1/jobs/ingest/press-release` | POST | WF3 |
+| `POST /api/v1/jobs/recompute-scores` | POST | Manual / scheduled ops |
+| `GET /api/v1/dashboards/top-threats` | GET | WF1, WF4 |
+| `GET /api/v1/dashboards/recent-events` | GET | WF2, WF4 |
+| `GET /api/v1/dashboards/summary` | GET | WF4, WF5 |
+| `GET /api/v1/dashboards/review-queue` | GET | WF4 |
+| `GET /api/v1/intelligence/digest` | GET | WF4 (legacy) |
+| `GET /api/v1/intelligence/weekly-digest-v2` | GET | WF3 (optional) |
+| `POST /api/v1/intelligence/generate-briefings` | POST | WF5 |
